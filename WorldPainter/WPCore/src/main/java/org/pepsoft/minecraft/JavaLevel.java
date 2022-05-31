@@ -23,6 +23,7 @@ import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
 import static java.nio.charset.StandardCharsets.US_ASCII;
+import static java.util.Arrays.asList;
 import static java.util.Arrays.stream;
 import static java.util.stream.Collectors.toList;
 import static org.pepsoft.minecraft.Constants.*;
@@ -58,7 +59,7 @@ public abstract class JavaLevel extends AbstractNBTItem {
             if (platform == JAVA_ANVIL) {
                 dataVersion = DATA_VERSION_MC_1_12_2;
             } else if (platform == JAVA_ANVIL_1_15) {
-                dataVersion = DATA_VERSION_MC_1_15;
+                dataVersion = DATA_VERSION_MC_1_15_2;
             } else if (platform == JAVA_ANVIL_1_17) {
                 dataVersion = DATA_VERSION_MC_1_17;
             } else if (platform == JAVA_ANVIL_1_18) {
@@ -136,7 +137,7 @@ public abstract class JavaLevel extends AbstractNBTItem {
         }
         if (version == VERSION_ANVIL) {
             if (((maxHeight != DEFAULT_MAX_HEIGHT_ANVIL) && (dataVersion > DATA_VERSION_MC_1_14_4) && (dataVersion <= DATA_VERSION_MC_1_17_1))
-                    || ((maxHeight != DEFAULT_MAX_HEIGHT_1_18) && (dataVersion > DATA_VERSION_MC_1_17_1))){
+                    || ((maxHeight != DEFAULT_MAX_HEIGHT_1_18) && (dataVersion > DATA_VERSION_MC_1_17_1))) {
                 enableDataPacks(DATAPACK_VANILLA, DATAPACK_WORLDPAINTER);
                 createWorldPainterDataPack(worldDir);
             } else if (dataVersion > DATA_VERSION_MC_1_16_5) {
@@ -364,6 +365,25 @@ public abstract class JavaLevel extends AbstractNBTItem {
         setDouble(TAG_BORDER_DAMAGE_PER_BLOCK, borderDamagePerBlock);
     }
 
+    /**
+     * Set the multiplayer and single player spawn point and the single player location.
+     */
+    public void setSpawn(int x, int y, int z) {
+        setSpawnX(x);
+        setSpawnY(y);
+        setSpawnZ(z);
+        Map<String, Tag> playerSettings = getMap(TAG_PLAYER);
+        if (playerSettings == null) {
+            playerSettings = new HashMap<>();
+        }
+        playerSettings.put(TAG_SPAWN_X, new IntTag(TAG_SPAWN_X, x));
+        playerSettings.put(TAG_SPAWN_Y, new IntTag(TAG_SPAWN_Y, y));
+        playerSettings.put(TAG_SPAWN_Z, new IntTag(TAG_SPAWN_Z, x));
+        playerSettings.put(TAG_SPAWN_FORCED, new ByteTag(TAG_SPAWN_FORCED, (byte) 1));
+        playerSettings.put(TAG_POS, new ListTag<>(TAG_POS, DoubleTag.class, asList(new DoubleTag("", x + 0.5), new DoubleTag("", y), new DoubleTag("", z + 0.5))));
+        setMap(TAG_PLAYER, playerSettings);
+    }
+
     public Platform getPlatform() {
         return platform;
     }
@@ -423,8 +443,10 @@ public abstract class JavaLevel extends AbstractNBTItem {
     public static JavaLevel create(Platform platform, int mapHeight) {
         if (platform == JAVA_ANVIL_1_18) {
             return new Java118Level(mapHeight, platform);
+        } else if (platform == JAVA_ANVIL_1_17) {
+            return new Java116Level(mapHeight, platform);
         } else {
-            return new Java117Level(mapHeight, platform);
+            return new Java115Level(mapHeight, platform);
         }
     }
 
@@ -479,13 +501,14 @@ public abstract class JavaLevel extends AbstractNBTItem {
                                 DataPack datapack = DataPack.load(worldDir, name);
                                 for (Map.Entry<String, Descriptor> entry: datapack.getDescriptors().entrySet()) {
                                     if ((entry.getValue() instanceof org.pepsoft.minecraft.datapack.Dimension) && entry.getKey().endsWith("overworld.json")) {
+                                        int minY = ((org.pepsoft.minecraft.datapack.Dimension) entry.getValue()).getMinY();
                                         int height = ((org.pepsoft.minecraft.datapack.Dimension) entry.getValue()).getHeight();
                                         if (height != 0) {
-                                            if (maxHeightEncountered && (height != maxHeight)) {
-                                                throw new IllegalArgumentException(String.format("Multiple different maxHeights (%d and %d) encountered in data packs", maxHeight, height));
+                                            if (maxHeightEncountered && ((minY + height) != maxHeight)) {
+                                                throw new IllegalArgumentException(String.format("Multiple different maxHeights (%d and %d) encountered in data packs", maxHeight, minY + height));
                                             } else {
-                                                logger.debug("Map height {} detected from data pack {} while loading {}", height, entry.getKey(), levelDatFile);
-                                                maxHeight = height;
+                                                logger.debug("Map height {} detected from data pack {} while loading {}", minY + height, entry.getKey(), levelDatFile);
+                                                maxHeight = minY + height;
                                                 maxHeightEncountered = true;
                                             }
                                         }
@@ -509,8 +532,14 @@ public abstract class JavaLevel extends AbstractNBTItem {
             // TODO refactor map importing
             throw new UnsupportedOperationException("Don't know how to determine height of this map");
         }
-        
-        return (dataVersion <= DATA_VERSION_MC_1_17_1) ? new Java117Level((CompoundTag) tag, maxHeight) : new Java118Level((CompoundTag) tag, maxHeight);
+
+        if (dataVersion <= DATA_VERSION_MC_1_15_2) {
+            return new Java115Level((CompoundTag) tag, maxHeight);
+        } else if (dataVersion <= DATA_VERSION_MC_1_17_1) {
+            return new Java116Level((CompoundTag) tag, maxHeight);
+        } else {
+            return new Java118Level((CompoundTag) tag, maxHeight);
+        }
     }
 
     private void createWorldPainterDataPack(File worldDir) {

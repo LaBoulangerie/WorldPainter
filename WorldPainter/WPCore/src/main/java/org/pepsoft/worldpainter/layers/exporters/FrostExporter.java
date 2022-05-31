@@ -29,8 +29,8 @@ import static org.pepsoft.worldpainter.exporting.SecondPassLayerExporter.Stage.A
  * @author pepijn
  */
 public class FrostExporter extends AbstractLayerExporter<Frost> implements SecondPassLayerExporter {
-    public FrostExporter() {
-        super(Frost.INSTANCE, new FrostSettings());
+    public FrostExporter(Dimension dimension, Platform platform, ExporterSettings settings) {
+        super(dimension, platform, (settings != null) ? settings : new FrostSettings(), Frost.INSTANCE);
     }
 
     @Override
@@ -39,8 +39,8 @@ public class FrostExporter extends AbstractLayerExporter<Frost> implements Secon
     }
 
     @Override
-    public List<Fixup> addFeatures(final Dimension dimension, final Rectangle area, final Rectangle exportedArea, final MinecraftWorld minecraftWorld, Platform platform) {
-        final FrostSettings settings = (FrostSettings) getSettings();
+    public List<Fixup> addFeatures(final Rectangle area, final Rectangle exportedArea, final MinecraftWorld minecraftWorld) {
+        final FrostSettings settings = (FrostSettings) super.settings;
         final boolean frostEverywhere = settings.isFrostEverywhere();
         final int mode = settings.getMode();
         final boolean snowUnderTrees = settings.isSnowUnderTrees();
@@ -58,8 +58,17 @@ public class FrostExporter extends AbstractLayerExporter<Frost> implements Secon
                     int leafBlocksEncountered = 0;
                     for (int height = Math.min(highestNonAirBlock, maxHeight - 2); height >= minHeight; height--) {
                         Material material = minecraftWorld.getMaterialAt(x, y, height);
-                        if (material.isNamed(MC_WATER) && (material.getProperty(LAYERS, 0) == 0)) {
+                        if ((material.isNamed(MC_WATER) && (material.getProperty(LAYERS, 0) == 0))
+                                || (material.containsWater() && material.insubstantial)) {
                             minecraftWorld.setMaterialAt(x, y, height, ICE);
+                            // Remove insubstantial blocks above, assuming they are plants we cut in half
+                            for (int dz = height + 1; dz <= highestNonAirBlock; dz++) {
+                                if (minecraftWorld.getMaterialAt(x, y, dz).insubstantial) {
+                                    minecraftWorld.setMaterialAt(x, y, dz, AIR);
+                                } else {
+                                    break;
+                                }
+                            }
                             break;
                         } else if (material.canSupportSnow) {
                             if ((material.name.endsWith("_leaves"))

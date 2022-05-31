@@ -74,6 +74,7 @@ public final class Constants {
     public static final AttributeKeyVO<Long> ATTRIBUTE_KEY_FREE_MEMORY = new AttributeKeyVO<>("memory.free");
     public static final AttributeKeyVO<Long> ATTRIBUTE_KEY_TOTAL_MEMORY = new AttributeKeyVO<>("memory.total");
     public static final AttributeKeyVO<Long> ATTRIBUTE_KEY_MAX_MEMORY = new AttributeKeyVO<>("memory.max");
+    public static final AttributeKeyVO<String> ATTRIBUTE_KEY_PLATFORM_ID = new AttributeKeyVO<>("platform.id");
 
     public static final String ATTRIBUTE_KEY_MDC_ENTRY = "mdc";
     public static final String ATTRIBUTE_KEY_SYSTEM_PROPERTY = "systemProperty";
@@ -94,6 +95,7 @@ public final class Constants {
     public static final String EVENT_KEY_DONATION_NO_THANKS       = "donation.noThanks";
     public static final String EVENT_KEY_DONATION_CLOSED          = "donation.closed";
     public static final String EVENT_KEY_EXCEPTION                = "exception";
+    public static final String EVENT_KEY_MERCH_STORE_OPENED       = "store.merch.opened";
 
     public static final int BIOME_ALGORITHM_1_1                 =  4;
     public static final int BIOME_ALGORITHM_1_2_AND_1_3_DEFAULT =  5;

@@ -19,7 +19,7 @@ import static org.pepsoft.minecraft.Constants.*;
 public abstract class AbstractMinecraft1_18BiomeScheme extends AbstractBiomeScheme implements Minecraft1_18Biomes {
     @Override
     public final int getBiomeCount() {
-        return BIOME_NAMES.length;
+        return HIGHEST_BIOME_ID + 1;
     }
 
     @Override

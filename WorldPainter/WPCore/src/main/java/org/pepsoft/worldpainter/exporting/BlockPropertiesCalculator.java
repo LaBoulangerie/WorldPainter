@@ -12,10 +12,14 @@ import org.pepsoft.worldpainter.Platform;
 
 import java.util.Arrays;
 
+import static java.lang.Math.max;
 import static org.pepsoft.minecraft.Constants.MC_DISTANCE;
 import static org.pepsoft.minecraft.Constants.MC_WATER;
 import static org.pepsoft.minecraft.Material.*;
+import static org.pepsoft.util.MathUtils.clamp;
 import static org.pepsoft.worldpainter.DefaultPlugin.*;
+import static org.pepsoft.worldpainter.Platform.Capability.LEAF_DISTANCES;
+import static org.pepsoft.worldpainter.Platform.Capability.PRECALCULATED_LIGHT;
 
 /**
  * A block properties calculator for MinecraftWorlds. This can calculate properties of blocks that are influenced by
@@ -44,13 +48,11 @@ public class BlockPropertiesCalculator {
     public BlockPropertiesCalculator(MinecraftWorld world, Platform platform, BlockBasedExportSettings exportSettings) {
         this.world = world;
         this.platform = platform;
-        skyLight = exportSettings.isCalculateSkyLight();
-        blockLight = exportSettings.isCalculateBlockLight();
-        leafDistance = exportSettings.isCalculateLeafDistance();
-        removeFloatingLeaves = exportSettings.isRemoveFloatingLeaves();
-        if (removeFloatingLeaves && (! leafDistance)) {
-            throw new IllegalArgumentException("removeFloatingLeaves requires calculateLeafDistance");
-        } else if ((! skyLight) && (! blockLight) && (! leafDistance)) {
+        skyLight = exportSettings.isCalculateSkyLight() && platform.capabilities.contains(PRECALCULATED_LIGHT);
+        blockLight = exportSettings.isCalculateBlockLight() && platform.capabilities.contains(PRECALCULATED_LIGHT);
+        leafDistance = exportSettings.isCalculateLeafDistance() && platform.capabilities.contains(LEAF_DISTANCES);
+        removeFloatingLeaves = leafDistance && exportSettings.isRemoveFloatingLeaves();
+        if ((! skyLight) && (! blockLight) && (! leafDistance)) {
             throw new IllegalArgumentException("Nothing to do");
         }
         minHeight = world.getMinHeight();
@@ -95,7 +97,7 @@ public class BlockPropertiesCalculator {
                         final int xInMaxHeightsMap = chunkX + dx - maxHeightsXOffset;
                         final int zInMaxHeightsMap = chunkZ + dz - maxHeightsZOffset;
                         if ((xInMaxHeightsMap >= 0) && (zInMaxHeightsMap >= 0) && (zInMaxHeightsMap < maxHeights.length) && (xInMaxHeightsMap < maxHeights[0].length)) {
-                            maxHeights[zInMaxHeightsMap][xInMaxHeightsMap] = Math.max(maxHeights[zInMaxHeightsMap][xInMaxHeightsMap], highestPossibleAffectedBlock);
+                            maxHeights[zInMaxHeightsMap][xInMaxHeightsMap] = max(maxHeights[zInMaxHeightsMap][xInMaxHeightsMap], highestPossibleAffectedBlock);
                         }
                     }
                 }
@@ -142,9 +144,8 @@ public class BlockPropertiesCalculator {
                                     // Opaque block
                                     newSkyLightLevel = 0;
                                 } else {
-                                    // Transparent block, or unknown block. We err on the
-                                    // side of transparency for unknown blocks to try and
-                                    // cause less visible lighting bugs
+                                    // Transparent block, or unknown block. We err on the side of transparency for
+                                    // unknown blocks to try and cause less visible lighting bugs
                                     newSkyLightLevel = (currentSkylightLevel < 15) ? calculateSkyLightLevel(chunk, x, y, z, material) : 15;
                                 }
                                 if (newSkyLightLevel != currentSkylightLevel) {
@@ -159,10 +160,9 @@ public class BlockPropertiesCalculator {
                                     // Opaque block
                                     newBlockLightLevel = (material.blockLight > 0) ? currentBlockLightLevel : 0;
                                 } else {
-                                    // Transparent block, or unknown block. We err on the
-                                    // side of transparency for unknown blocks to try and
-                                    // cause less visible lighting bugs
-                                    newBlockLightLevel = (material.blockLight > 0) ? currentBlockLightLevel : calculateBlockLightLevel(chunk, x, y, z);
+                                    // Transparent block, or unknown block. We err on the side of transparency for
+                                    // unknown blocks to try and cause less visible lighting bugs
+                                    newBlockLightLevel = max(currentBlockLightLevel, calculateBlockLightLevel(chunk, x, y, z));
                                 }
                                 if (newBlockLightLevel != currentBlockLightLevel) {
                                     chunk.setBlockLightLevel(xInChunk, y, zInChunk, newBlockLightLevel);
@@ -184,7 +184,7 @@ public class BlockPropertiesCalculator {
             }
         }
         if (changed) {
-            dirtyArea.setY1(Math.max(lowestY, minHeight));
+            dirtyArea.setY1(max(lowestY, minHeight));
             dirtyArea.setY2(Math.min(highestY + 1, maxHeight));
         }
         return changed;
@@ -196,13 +196,16 @@ public class BlockPropertiesCalculator {
     public int[] firstPass(Chunk chunk) {
         for (int x = 0; x < 16; x++) {
             Arrays.fill(DAYLIGHT[x], true);
-            Arrays.fill(HEIGHT[x], Math.min(chunk.getHighestNonAirBlock(), maxHeight - 1));
+            Arrays.fill(HEIGHT[x], clamp(minHeight, chunk.getHighestNonAirBlock(), maxHeight - 1));
         }
         // The point above which there are only transparent, non light source and non-leaf blocks
         int dirtyVolumeHighMark = minHeight;
         // The point below which there are only non-transparent, non light source and non-leaf blocks
         int dirtyVolumeLowMark = maxHeight - 1;
-        for (int y = Math.min(chunk.getHighestNonAirBlock(), maxHeight - 1); y >= minHeight; y--) { // TODO: will this leave dark areas above the starting level?
+        int maxY = clamp(minHeight - 1, chunk.getHighestNonAirBlock(), maxHeight - 1);
+        // Round to top of section:
+        maxY = (((maxY >> 4) + 1) << 4) - 1;
+        for (int y = maxY; y >= minHeight; y--) {
             for (int x = 0; x < 16; x++) {
                 for (int z = 0; z < 16; z++) {
                     Material material = chunk.getMaterial(x, y, z);
@@ -226,13 +229,13 @@ public class BlockPropertiesCalculator {
                             if (y < dirtyVolumeLowMark) {
                                 dirtyVolumeLowMark = y;
                             }
-                            int transparency = getTransparency(material);
-                            if ((transparency == 0) && (DAYLIGHT[x][z])) {
+                            int opacity = getOpacity(material);
+                            if ((opacity == 0) && (DAYLIGHT[x][z])) {
                                 // Propagate daylight down
                                 newSkyLightLevel = 15;
                                 HEIGHT[x][z] = y;
                             } else {
-                                if ((transparency > 0) && (y > dirtyVolumeHighMark)) {
+                                if ((opacity > 0) && (y > dirtyVolumeHighMark)) {
                                     dirtyVolumeHighMark = y;
                                 }
                                 newSkyLightLevel = 0; // TODO adjust with transparency of block above and 1-per-block falloff rather than going straight to zero
@@ -294,7 +297,7 @@ public class BlockPropertiesCalculator {
                 if (chunk == null) {
                     continue;
                 }
-                int maxY = Math.min(chunk.getHighestNonAirBlock(), dirtyArea.getY2());
+                int maxY = clamp(minHeight - 1, chunk.getHighestNonAirBlock(), dirtyArea.getY2());
                 for (int xInChunk = 0; xInChunk < 16; xInChunk++) {
                     for (int zInChunk = 0; zInChunk < 16; zInChunk++) {
                         final int x = (chunkX << 4) | xInChunk, z = (chunkZ << 4) | zInChunk;
@@ -314,12 +317,12 @@ public class BlockPropertiesCalculator {
                                     // Transparent block, or unknown block. We err on the
                                     // side of transparency for unknown blocks to try and
                                     // cause less visible lighting bugs
-                                    int transparency = getTransparency(material);
+                                    int transparency = getOpacity(material);
                                     if ((transparency == 0) && (skyLightLevelAbove == 15)) {
                                         // Propagate daylight down
                                         newSkyLightLevel = 15;
                                     } else {
-                                        newSkyLightLevel = Math.max(skyLightLevelAbove - Math.max(transparency, 1), 0);
+                                        newSkyLightLevel = max(skyLightLevelAbove - max(transparency, 1), 0);
                                     }
                                 } else {
                                     newSkyLightLevel = 0;
@@ -331,12 +334,7 @@ public class BlockPropertiesCalculator {
                             }
                             if (blockLight) {
                                 final int blockLightLevel = chunk.getBlockLightLevel(xInChunk, y, zInChunk);
-                                final int newBlockLightLevel;
-                                if (material.blockLight > 0) {
-                                    newBlockLightLevel = material.blockLight;
-                                } else {
-                                    newBlockLightLevel = 0;
-                                }
+                                final int newBlockLightLevel = material.blockLight;
                                 if (newBlockLightLevel != blockLightLevel) {
                                     chunk.setBlockLightLevel(xInChunk, y, zInChunk, newBlockLightLevel);
                                 }
@@ -353,14 +351,14 @@ public class BlockPropertiesCalculator {
      * steps of the process, such as removing floating leaf blocks.
      */
     public void finalise() {
-        if (! removeFloatingLeaves) {
+        if (! (removeFloatingLeaves || skyLight)) {
             return;
         }
         final int x1InChunks = originalDirtyArea.getX1() >> 4, z1InChunks = originalDirtyArea.getZ1() >> 4,
                 x2InChunks = (originalDirtyArea.getX2() - 1) >> 4, z2InChunks = (originalDirtyArea.getZ2() - 1) >> 4;
         for (int chunkX = x1InChunks; chunkX <= x2InChunks; chunkX++) {
             for (int chunkZ = z1InChunks; chunkZ <= z2InChunks; chunkZ++) {
-                final Chunk chunk = world.getChunk(chunkX, chunkZ);
+                final Chunk chunk = world.getChunkForEditing(chunkX, chunkZ);
                 if (chunk == null) {
                     continue;
                 }
@@ -370,7 +368,8 @@ public class BlockPropertiesCalculator {
                         final int x = (chunkX << 4) | xInChunk, z = (chunkZ << 4) | zInChunk;
                         for (int y = maxY; y >= originalDirtyArea.getY1() ; y--) {
                             Material material = chunk.getMaterial(xInChunk, y, zInChunk);
-                            if (material.name.endsWith("_leaves") && material.isPropertySet(MC_DISTANCE) && (material.getProperty(DISTANCE) > 6) && (! material.is(PERSISTENT))) {
+                            // TODO this class is a "calculator"; the actual removal of leaves should be moved up to the caller
+                            if (removeFloatingLeaves && material.name.endsWith("_leaves") && material.isPropertySet(MC_DISTANCE) && (material.getProperty(DISTANCE) > 6) && (! material.is(PERSISTENT))) {
                                 material = AIR;
                                 chunk.setMaterial(xInChunk, y, zInChunk, material);
                                 if (skyLight) {
@@ -393,7 +392,7 @@ public class BlockPropertiesCalculator {
                                 }
                                 if (blockLight) {
                                     final int currentBlockLightLevel = chunk.getBlockLightLevel(xInChunk, y, zInChunk);
-                                    final int newBlockLightLevel = (material.blockLight > 0) ? currentBlockLightLevel : calculateBlockLightLevel(chunk, x, y, z);
+                                    final int newBlockLightLevel = calculateBlockLightLevel(chunk, x, y, z);
                                     if (newBlockLightLevel != currentBlockLightLevel) {
                                         chunk.setBlockLightLevel(xInChunk, y, zInChunk, newBlockLightLevel);
                                     }
@@ -401,6 +400,13 @@ public class BlockPropertiesCalculator {
                                 // NOTE: in theory we should start all the way over with the lighting calculations, but
                                 // that would take a huge amount of time again, so instead we just hope the lighting
                                 // bugs are not too obvious
+                            } else if (skyLight && material.receivesLight) {
+                                // Dirty hack to fix lighting of weird blocks that receive light but don't transmit it
+                                // NOTE: this is not entirely correct since it only looks above, but it's correct in 99%
+                                // of cases and hardly noticeable in the other 1%
+                                final int skyLightAbove = (y < (maxHeight - 1)) ? chunk.getSkyLightLevel(xInChunk, y + 1, zInChunk) : 15;
+                                final int newSkyLight = (skyLightAbove == 15) ? 15 : max(skyLightAbove - 1, 0);
+                                chunk.setSkyLightLevel(xInChunk, y, zInChunk, newSkyLight);
                             }
                         }
                     }
@@ -409,10 +415,10 @@ public class BlockPropertiesCalculator {
         }
     }
 
-    private int getTransparency(Material material) {
+    private int getOpacity(Material material) {
         // TODOMC13: make this generic:
-        if (((platform == JAVA_ANVIL_1_15) || (platform == JAVA_ANVIL_1_17) || (platform == JAVA_ANVIL_1_18)) && material.isNamed(MC_WATER)) {
-            return 1;
+        if (material.containsWater()) {
+            return ((platform == JAVA_ANVIL_1_15) || (platform == JAVA_ANVIL_1_17) || (platform == JAVA_ANVIL_1_18)) ? 1 : 3;
         } else {
             return material.opacity;
         }
@@ -460,7 +466,7 @@ public class BlockPropertiesCalculator {
                 }
             }
         }
-        return Math.max(highestSurroundingSkyLight - Math.max(getTransparency(material), 1), 0);
+        return max(highestSurroundingSkyLight - max(getOpacity(material), 1), 0);
     }
 
     // MC coordinate system
@@ -498,7 +504,7 @@ public class BlockPropertiesCalculator {
                 }
             }
         }
-        return Math.max(highestSurroundingBlockLight - Math.max(getTransparency(material), 1), 0);
+        return max(highestSurroundingBlockLight - max(getOpacity(material), 1), 0);
     }
 
     // MC coordinate system
